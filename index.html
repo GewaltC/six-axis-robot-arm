@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RoboStudio 6-DOF · 六轴机械臂 Three.js 仿真操控平台</title>
+  <link rel="stylesheet" href="./css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- 3D Viewport -->
+  <div id="viewport"></div>
+
+  <!-- Top Navigation & Action Bar -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">6D</div>
+      <span class="brand-title">RoboStudio</span>
+      <span class="model-badge" id="modelBadge" title="默认开源精细模型：Universal Robots UR5e (ROS 2 BSD-3-Clause)">
+        <span class="dot"></span>
+        <span id="modelBadgeText">UR5e · 6-DOF · URDF</span>
+      </span>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn primary" id="btnOpenImport" title="导入自定义机械臂模型 (URDF/ZIP/GLB/GLTF/STL/OBJ)">
+        导入模型
+      </button>
+      <button class="btn" id="btnResetDefault" title="恢复内置开源 Universal Robots UR5e 精细模型">
+        默认 UR5e
+      </button>
+      <button class="btn" id="btnOpenMapper" style="display:none;" title="为导入的 GLB/GLTF 模型手动绑定 J1-J6 节点与旋转轴">
+        关节映射
+      </button>
+
+      <div class="divider-v"></div>
+
+      <button class="btn" id="btnToggleIkGizmo" title="开启 3D 逆运动学目标拖拽控制柄">
+        IK 拖拽
+      </button>
+      <button class="btn active" id="btnToggleTrail" title="显示/隐藏末端 TCP 3D 运动轨迹">
+        轨迹
+      </button>
+      <button class="btn" id="btnClearTrail" title="清除当前 3D 运动轨迹">
+        清迹
+      </button>
+      <button class="btn" id="btnToggleAxes" title="显示/隐藏各关节局部坐标系 (RGB=XYZ)">
+        关节轴
+      </button>
+      <button class="btn" id="btnToggleEnvelope" title="显示/隐藏最大工作空间包络球">
+        包络
+      </button>
+      <button class="btn" id="btnToggleWireframe" title="切换线框视图检查网格细节">
+        线框
+      </button>
+      <button class="btn" id="btnToggleTheme" title="切换深色工业 / 浅色展厅主题">
+        浅色
+      </button>
+      <button class="btn" id="btnCollapsePanel" title="折叠/展开右侧控制面板">
+        收起
+      </button>
+    </div>
+  </header>
+
+  <!-- Bottom-Left Floating Telemetry HUD & Camera Bar -->
+  <div class="hud-bottom-left">
+    <div class="telemetry-card">
+      <div class="telemetry-head">
+        <span class="telemetry-title">末端 TCP 实时位姿 (基座标系 Z-UP)</span>
+        <span class="status-pill" id="statusPill">READY</span>
+      </div>
+      <div class="telemetry-grid">
+        <div class="tel-cell"><span class="tel-axis ax-x">X</span><span class="tel-val" id="telX">0.0</span></div>
+        <div class="tel-cell"><span class="tel-axis ax-y">Y</span><span class="tel-val" id="telY">0.0</span></div>
+        <div class="tel-cell"><span class="tel-axis ax-z">Z</span><span class="tel-val" id="telZ">0.0</span></div>
+        <div class="tel-cell"><span class="tel-axis ax-x">RX</span><span class="tel-val" id="telRX">0.0°</span></div>
+        <div class="tel-cell"><span class="tel-axis ax-y">RY</span><span class="tel-val" id="telRY">0.0°</span></div>
+        <div class="tel-cell"><span class="tel-axis ax-z">RZ</span><span class="tel-val" id="telRZ">0.0°</span></div>
+      </div>
+    </div>
+
+    <div class="camera-bar">
+      <button class="btn sm" data-cam="iso">等轴</button>
+      <button class="btn sm" data-cam="front">正视</button>
+      <button class="btn sm" data-cam="side">侧视</button>
+      <button class="btn sm" data-cam="top">俯视</button>
+      <button class="btn sm" data-cam="fit">自适应居中</button>
+    </div>
+  </div>
+
+  <!-- Right Control Panel -->
+  <aside class="side-panel" id="sidePanel">
+    <div class="panel-tabs">
+      <button class="tab-btn active" data-tab="tab-fk">关节控制 FK</button>
+      <button class="tab-btn" data-tab="tab-ik">笛卡尔 IK</button>
+      <button class="tab-btn" data-tab="tab-teach">示教轨迹</button>
+    </div>
+
+    <div class="panel-body">
+      <!-- TAB 1: Joint Forward Kinematics -->
+      <div class="tab-pane active" id="tab-fk">
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">六轴关节角度控制</span>
+            <button class="btn sm" id="btnZeroAll">全部归零</button>
+          </div>
+          <div class="joint-list" id="jointList">
+            <!-- Dynamically populated J1..J6 controls -->
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">末端执行器 / 电动夹爪</span>
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkGripper" checked />
+              启用夹爪
+            </label>
+          </div>
+          <div class="row-between">
+            <span style="font-size:11.5px;color:var(--text-secondary);">夹爪开合度</span>
+            <span class="unit-label" id="gripperValText">55 mm (65%)</span>
+          </div>
+          <input type="range" id="sliderGripper" min="0" max="100" value="65" />
+          <div class="row-flex" style="margin-top:2px;">
+            <button class="btn sm" id="btnMountTool" style="flex:1;">挂载自定义工具 (STL/GLB/OBJ)</button>
+            <button class="btn sm danger" id="btnRemoveTool" style="display:none;">卸载工具</button>
+          </div>
+          <input type="file" id="inputToolFile" accept=".glb,.gltf,.stl,.obj" hidden />
+        </div>
+
+        <div class="section-card" id="presetsCard">
+          <div class="section-header">
+            <span class="section-title">预设工业位姿</span>
+          </div>
+          <div class="preset-grid" id="presetGrid">
+            <!-- Populated from presetsAndTrajectory.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: Cartesian Inverse Kinematics -->
+      <div class="tab-pane" id="tab-ik">
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">3D 实时 IK 拖拽控制柄</span>
+          </div>
+          <div class="row-flex">
+            <button class="btn sm" id="btnIkEnablePanel" style="flex:1;">开启 3D 拖拽 Gizmo</button>
+            <button class="btn sm active" id="btnGizmoTranslate">平移</button>
+            <button class="btn sm" id="btnGizmoRotate">旋转</button>
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="chkIkOrientation" checked />
+            6-DOF 姿态约束（同时求解末端位置与朝向）
+          </label>
+          <p style="font-size:11.5px;color:var(--text-muted);line-height:1.5;">
+            开启后可直接在 3D 视图拖动坐标箭头实时反解 6 轴关节角（基于阻尼最小二乘雅可比求解器）。
+          </p>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">目标笛卡尔位姿求解</span>
+            <button class="btn sm" id="btnSyncCurPose">读取当前</button>
+          </div>
+          <div class="pose-grid">
+            <div class="pose-field"><label>X (mm)</label><input type="number" id="ikX" step="5" value="0" /></div>
+            <div class="pose-field"><label>Y (mm)</label><input type="number" id="ikY" step="5" value="0" /></div>
+            <div class="pose-field"><label>Z (mm)</label><input type="number" id="ikZ" step="5" value="0" /></div>
+            <div class="pose-field"><label>RX (°)</label><input type="number" id="ikRX" step="5" value="0" /></div>
+            <div class="pose-field"><label>RY (°)</label><input type="number" id="ikRY" step="5" value="0" /></div>
+            <div class="pose-field"><label>RZ (°)</label><input type="number" id="ikRZ" step="5" value="0" /></div>
+          </div>
+          <button class="btn primary" id="btnSolveIkMove">IK 求解并平滑移动</button>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">空间步进点动 (Jog ±25mm)</span>
+          </div>
+          <div class="jog-pad">
+            <button class="btn sm" data-jog="x" data-dir="-1">X −</button>
+            <button class="btn sm" data-jog="y" data-dir="-1">Y −</button>
+            <button class="btn sm" data-jog="z" data-dir="-1">Z −</button>
+            <button class="btn sm" data-jog="x" data-dir="1">X +</button>
+            <button class="btn sm" data-jog="y" data-dir="1">Y +</button>
+            <button class="btn sm" data-jog="z" data-dir="1">Z +</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: Teach Pendant & Trajectory Playback -->
+      <div class="tab-pane" id="tab-teach">
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">工业搬运演示程序</span>
+          </div>
+          <div class="row-flex">
+            <button class="btn primary" id="btnRunDemo" style="flex:1;">运行 UR5e 抓取搬运 Demo</button>
+            <button class="btn danger" id="btnStopMotion">停止</button>
+          </div>
+          <div class="row-between" style="margin-top:4px;">
+            <span style="font-size:11.5px;color:var(--text-secondary);">播放速度倍率</span>
+            <span class="unit-label" id="speedValText">1.0x</span>
+          </div>
+          <input type="range" id="sliderSpeed" min="25" max="250" value="100" />
+          <label class="checkbox-label">
+            <input type="checkbox" id="chkLoop" checked />
+            循环连续播放轨迹
+          </label>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">自定义点位示教列表</span>
+            <button class="btn sm primary" id="btnAddWaypoint">+ 记录当前点位</button>
+          </div>
+          <div class="waypoint-list" id="waypointList">
+            <div class="empty-hint">暂无自定义示教点位，调整好姿态后点击「+ 记录当前点位」</div>
+          </div>
+          <div class="row-flex">
+            <button class="btn sm primary" id="btnPlayWaypoints" style="flex:1;">播放示教轨迹</button>
+            <button class="btn sm" id="btnExportWp">导出 JSON</button>
+            <button class="btn sm" id="btnImportWp">导入</button>
+            <button class="btn sm danger" id="btnClearWp">清空</button>
+          </div>
+          <input type="file" id="inputWpJson" accept=".json" hidden />
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <button class="btn primary panel-toggle-floating" id="btnExpandPanel">展开操控台</button>
+
+  <!-- Import Model Modal -->
+  <div class="modal-backdrop" id="importModal">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3>导入自定义机械臂 3D 模型</h3>
+        <button class="btn sm" id="btnCloseImport">关闭</button>
+      </div>
+      <div class="modal-body">
+        <div class="dropzone-box">
+          <div style="font-size:14px;font-weight:700;color:var(--text-primary);">
+            支持拖拽文件或点击下方按钮导入
+          </div>
+          <p>
+            支持完整 ROS <strong>URDF 描述包</strong>（自动解析关节链与限位）、<strong>GLB / GLTF</strong>（自动识别关节并支持手动 6 轴映射），以及 <strong>DAE / STL / OBJ</strong> 网格。
+          </p>
+          <div class="format-tags">
+            <span class="format-tag">.urdf + meshes</span>
+            <span class="format-tag">.zip (URDF包)</span>
+            <span class="format-tag">.glb / .gltf</span>
+            <span class="format-tag">.dae / .stl / .obj</span>
+          </div>
+          <div class="row-flex" style="margin-top:8px;flex-wrap:wrap;justify-content:center;">
+            <button class="btn primary" id="btnPickFiles">选择文件 (多选 / ZIP / GLB)</button>
+            <button class="btn" id="btnPickFolder">选择 URDF 文件夹</button>
+          </div>
+          <input type="file" id="inputModelFiles" multiple accept=".urdf,.zip,.glb,.gltf,.dae,.stl,.obj,.bin,.png,.jpg,.jpeg" hidden />
+          <input type="file" id="inputModelFolder" webkitdirectory directory multiple hidden />
+        </div>
+
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.65;">
+          <strong>使用提示：</strong><br />
+          1. 导入 <b>URDF</b> 时，建议选择包含 <code>.urdf</code> 与 <code>meshes/</code> 的整个文件夹，或打包为 <code>.zip</code> 直接上传。<br />
+          2. 导入 <b>GLB / GLTF</b> 时，系统会自动搜索层级关节；若模型节点命名不规范，导入后可点击顶部 <b>「关节映射」</b> 手动绑定 J1–J6 节点与旋转轴。<br />
+          3. 也可以直接将模型文件拖拽到主 3D 视窗任意位置！
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="btnCloseImport2">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GLTF Joint Mapper Modal -->
+  <div class="modal-backdrop" id="mapperModal">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3>自定义 6 轴关节节点映射 (GLB / GLTF)</h3>
+        <button class="btn sm" id="btnCloseMapper">关闭</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px;color:var(--text-secondary);line-height:1.5;">
+          将导入模型的层级节点（Group / Bone / Mesh）分别绑定至 J1–J6 逻辑关节并指定其局部旋转轴，保存后即可使用滑块、IK 与轨迹示教功能。
+        </p>
+        <div id="mapperRows" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="btnCloseMapper2">取消</button>
+        <button class="btn primary" id="btnApplyMapping">应用映射</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full-viewport Drag & Drop Indicator -->
+  <div class="drop-overlay" id="dropOverlay">
+    <div style="font-size:20px;font-weight:700;">松开鼠标以导入机械臂模型</div>
+    <div style="font-size:13px;opacity:0.9;">支持 .urdf (+网格) / .zip / .glb / .gltf / .dae / .stl / .obj</div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">正在加载开源精细模型 Universal Robots UR5e...</div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
